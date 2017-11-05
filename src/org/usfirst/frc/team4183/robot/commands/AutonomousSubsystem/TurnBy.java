@@ -49,43 +49,58 @@ public class TurnBy extends Command implements ControlLoop.ControlLoopUser {
 	private RateLimit rateLimit;
 	private SettledDetector settledDetector;
 		
-
-	private boolean WRITE_LOG_FILE = false;
-	private static LogWriterFactory logFactory = new LogWriterFactory("TurnBy");
-	private LogWriterFactory.Writer logWriter;
+	// Create a counting system to append to the file name each time
+	// command runs; this means the control loop or other logging
+	// form can simply use the counter to create uniqueness
+	private static long instanceCount = 0;
 	
-	
-	public TurnBy( double degreesToTurn) {		
+	public TurnBy( double degreesToTurn) 
+	{		
 		requires( Robot.autonomousSubsystem);
 		
-		this.degreesToTurn = degreesToTurn;		
+		this.degreesToTurn = degreesToTurn;
+		
+		TurnBy.instanceCount++;
 	}
 
 	@Override
-	protected void initialize() {
+	protected void initialize() 
+	{
 		// Compute setPoint
 		double setPoint = degreesToTurn + Robot.imu.getYawDeg();
 		
 		// Make helpers
 		rateLimit = new RateLimit( RATE_LIM_PER_SEC);
 		settledDetector = new SettledDetector( SETTLED_MSECS, DEAD_ZONE_DEG);
-		logWriter = logFactory.create( WRITE_LOG_FILE);	
 			
-		// Fire up the loop
-		cloop = new ControlLoop( this, setPoint);
-		cloop.enableLogging("TurnBy");
+		// Fire up the control loop at 100 Hz and record the setpoint and feedback
+	       /// TODO: Truthfully I don't like this approach (lazy initialization patterns)
+        /// I would create persistent loops in the subsystem that have enable/disable 
+        /// (blocking logic) along with settings to be adjusted by the various commands. 
+        /// Why? Simply because we waste time and create more non-determinism in a system 
+        /// that creates/destroys objects as it goes.
+        /// If we were constantly calling a drive straight command for various reason then
+        /// eventually a garbage collection cycle will cause a hiccup that just adds uncertainty
+        /// to a world that prefers deterministic responses.
+		cloop = new ControlLoop( this, 
+				                 setPoint, 
+				                 10, 
+				                 String.format("TurnBy_%d", TurnBy.instanceCount));
+		cloop.setLoggingKey("TurnBy");	// Displays this key on dashboard AND writes files (set to "" to disable)
 		cloop.start();
 	}
 	
 
 	
 	@Override
-	protected boolean isFinished() {
+	protected boolean isFinished() 
+	{
 		
 		if( settledDetector.isSettled() 
 			&&
 			Robot.imu.getYawRateDps() < STOPPED_RATE_DPS
-		) {
+		  ) 
+		{
 			return true;
 		}
 		
@@ -93,55 +108,61 @@ public class TurnBy extends Command implements ControlLoop.ControlLoopUser {
 	}
 	
 	@Override
-	protected void end() {
+	protected void end() 
+	{
 	
 		// Don't forget to stop the control loop!
 		cloop.stop();
-		
-		logWriter.close();
 
 		// Set output to zero before leaving
     	Robot.driveSubsystem.doAutoTurn(0.0);
 	}
 	
 	@Override
-	protected void interrupted() {
+	protected void interrupted() 
+	{
 		end();
 	}
 	
 	
 	@Override
-	public double getFeedback() {
+	public double getFeedback() 
+	{
 		return Robot.imu.getYawDeg();
 	}
 	
 	@Override
-	public void setError( double error) {
-		
-		logWriter.writeLine( 
-				String.format("%f %f", error, Robot.imu.getYawRateDps())); 
-			
+	public void setError( double error) 
+	{			
 		settledDetector.set(error);
 										
 		double x;		
-		if( Math.abs(error) < MIN_DRIVE_ANGLE_DEG)
+		if( Math.abs(error) <= MIN_DRIVE_ANGLE_DEG)
+		{
 			x = Math.signum(error)*MIN_DRIVE;
+		}
 		else 
-			x = Math.signum(error)*MAX_DRIVE;		
+		{
+			x = Math.signum(error)*MAX_DRIVE;	
+		}
 		
 		x = rateLimit.f(x);
 		
-		if( Math.abs(error) < DEAD_ZONE_DEG)
+		if( Math.abs(error) <= DEAD_ZONE_DEG)
+		{
 			x = 0.0;				
-
-		if( Math.abs(error) > DEAD_ZONE_DEG)
+		}
+		else
+		{
 			x += DITHER_AMPL*ditherSignal();
+		}
 
 		// Set the output
     	Robot.driveSubsystem.doAutoTurn(x);		
 	}
 	
-	double ditherSignal() {
+	double ditherSignal() 
+	{
 		return Math.sin( DITHER_FREQ*(2.0*Math.PI)*System.currentTimeMillis()/1000.0);
 	}
 

@@ -1,4 +1,7 @@
 package org.usfirst.frc.team4183.utils;
+import java.io.PrintWriter;
+
+import org.usfirst.frc.team4183.utils.LogWriterFactory;
 
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 
@@ -20,18 +23,35 @@ import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
  * 4) Call stop() when appropriate (you have to determine when that is).
  *    
  * @author twilson
+ * 
+ * Modified: mkessel
  *
  */
 public class ControlLoop {
 
-	// This maybe should be longer - 40 or 50?
-	private final static long DEFAULT_MSECS = 20;  
+	private final static long DEFAULT_MSECS = 10;	// Change value in construction to meet control needs  
 	private final long msecs;
 	private volatile double setPoint;
-	private volatile String loggingKey = "";
 	
+	private volatile String loggingKey = "";
+
 	private final LoopThread loopThread;
 	private final ControlLoopUser user;
+	
+	private LogWriterFactory logFactory;
+	private LogWriterFactory.Writer logWriter;
+	
+	private class LoggerClient implements ThreadLogger.Client 
+	{
+		@Override
+		public void writeLine( PrintWriter writer, long millis) 
+		{
+			writer.format("%6d %9.1f %9.1f\n", 
+					      millis,
+					      setPoint,
+					      user.getFeedback());
+		}
+	}
 	
 	/**
 	 * User of ControlLoop must provide an implementation of this interface
@@ -56,8 +76,9 @@ public class ControlLoop {
 	 * @param user  The user of this class
 	 * @param setPoint  The loop set point
 	 */
-	public ControlLoop( ControlLoopUser user, double setPoint) {
-		this( user, setPoint, DEFAULT_MSECS);
+	public ControlLoop( ControlLoopUser user, double setPoint, String loggerFileSpec) 
+	{
+		this( user, setPoint, DEFAULT_MSECS, loggerFileSpec);
 	}
 	
 	/**
@@ -65,27 +86,43 @@ public class ControlLoop {
 	 * @param user  The user of this class
 	 * @param setPoint  The loop set point
 	 * @param msecs  The loop interval
+	 * @param loggerFileSpec base file name used by the logger (caller should increment something to clarify records)
 	 */
-	public ControlLoop( ControlLoopUser user, double setPoint, long msecs) {
+	public ControlLoop( ControlLoopUser user, double setPoint, long msecs, String loggerFileSpec) 
+	{
 		this.user = user;
 		this.setPoint = setPoint;
 		this.msecs = msecs;
 	
+		// Create a logger for control loops, actual use will depend
+		// on other flags to enable/disable logging (which can impact control timing
+		// if you are not careful on how often it is used)
+		logFactory = new LogWriterFactory(loggerFileSpec);
+		logWriter = logFactory.create(true);
+		
 		loopThread = new LoopThread();
-		loopThread.setPriority(Thread.NORM_PRIORITY+2);		
+		loopThread.setPriority(Thread.NORM_PRIORITY+2);
+		
 	}
 	
-	
-	public void enableLogging( String loggingKey) {
+	/**
+	 * Sets the logging key to display on dashboard
+	 * An empty string ("") will disable logging
+	 * @param loggingKey
+	 */
+	public void setLoggingKey( String loggingKey) 
+	{
 		this.loggingKey = loggingKey;
 	}
 	
 	
 	/**
 	 * Set the loop setpoint (normally done in constructor)
+	 * but can be used to change the setpoint on the fly
 	 * @param setPoint
 	 */
-	public void setSetpoint( double setPoint) {
+	public void setSetpoint( double setPoint) 
+	{
 		this.setPoint = setPoint;
 	}
 		
@@ -93,7 +130,8 @@ public class ControlLoop {
 	/**
 	 * Start operation
 	 */
-	public void start() {
+	public void start() 
+	{
 		loopThread.start();
 	}
 	
@@ -120,29 +158,47 @@ public class ControlLoop {
 	
 	
 	// This Thread implements the control loop
-	private class LoopThread extends Thread {
+	private class LoopThread extends Thread 
+	{
 						
-		private void quit() {
+		private void quit() 
+		{
 			interrupt();
 		}
 		
 		@Override
-		public void run( ) {
+		public void run( ) 
+		{
 									
 			// Loop until signaled to quit
-			while( !isInterrupted()) {
+			while( !isInterrupted()) 
+			{
 
-				double error = setPoint - user.getFeedback();
+				double feedback = user.getFeedback();
+				double error = setPoint - feedback;
 				
-				if( !loggingKey.equals(""))
+				// TODO: Consider separating dashboard control from file record control
+				if( ! loggingKey.equals(""))
+				{
 					SmartDashboard.putNumber(loggingKey, error);
+					
+					// Timestamp is automatic at writeLine
+				    logWriter.writeLine(String.format("%9.1f %9.1f\n", 
+					                                  setPoint, 
+					                                  feedback));
+				}
 					
 				user.setError( error);				
 				
 				// Delay
-				try {
+				/// TODO: sleep does not guarantee a schedule
+				/// Need some form of scheduled timer
+				try 
+				{
 					Thread.sleep(msecs);
-				} catch (InterruptedException e) {
+				} 
+				catch (InterruptedException e) 
+				{
 					interrupt();
 				}				
 			}			

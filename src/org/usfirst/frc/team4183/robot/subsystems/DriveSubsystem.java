@@ -2,6 +2,7 @@ package org.usfirst.frc.team4183.robot.subsystems;
 
 import edu.wpi.first.wpilibj.command.Subsystem;
 import com.ctre.CANTalon;
+import com.ctre.CANTalon.StatusFrameRate;
 
 import edu.wpi.first.wpilibj.RobotDrive;
 
@@ -32,6 +33,10 @@ public class DriveSubsystem extends Subsystem {
 		private final int ENCODER_PULSES_PER_REV = 250; 
 		private final boolean REVERSE_SENSOR = false;  
 
+		private final int ENCODER_STATUS_FRAME_PERIOD_MS = 10; 	/// TODO: should be coordinated with ControlLoops
+																/// Also note that control loop is not here but in 
+																/// various commands
+																/// Makes such coordination difficult
 		
 		private final CANTalon leftFrontMotor;
 		private final CANTalon leftRearMotor; 
@@ -42,7 +47,8 @@ public class DriveSubsystem extends Subsystem {
 		
 		private double yawSetPoint;		
 				
-		public DriveSubsystem() {
+		public DriveSubsystem() 
+		{
 
 			leftFrontMotor = new CANTalon(RobotMap.LEFT_FRONT_MOTOR_ID);
 			leftRearMotor = new CANTalon(RobotMap.LEFT_REAR_MOTOR_ID);
@@ -54,12 +60,15 @@ public class DriveSubsystem extends Subsystem {
 
 			// Set up the position encoders, can be used external to this class
 			leftFrontMotor.setFeedbackDevice(CANTalon.FeedbackDevice.QuadEncoder);
+			leftFrontMotor.setStatusFrameRateMs(StatusFrameRate.QuadEncoder, ENCODER_STATUS_FRAME_PERIOD_MS);
 			leftFrontMotor.configEncoderCodesPerRev(ENCODER_PULSES_PER_REV); 
 			leftFrontMotor.reverseSensor(REVERSE_SENSOR);
 			leftFrontMotor.setPosition(0.0);
 
 
 			rightFrontMotor.setFeedbackDevice(CANTalon.FeedbackDevice.QuadEncoder);
+			rightFrontMotor.setStatusFrameRateMs(StatusFrameRate.QuadEncoder, ENCODER_STATUS_FRAME_PERIOD_MS);	///
+			
 			rightFrontMotor.configEncoderCodesPerRev(ENCODER_PULSES_PER_REV);
 			rightFrontMotor.reverseSensor(REVERSE_SENSOR);
 			rightFrontMotor.setPosition(0.0);

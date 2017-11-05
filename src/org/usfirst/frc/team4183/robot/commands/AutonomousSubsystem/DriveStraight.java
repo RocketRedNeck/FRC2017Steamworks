@@ -51,43 +51,60 @@ public class DriveStraight extends Command implements ControlLoop.ControlLoopUse
 	private final double distanceInch;
 	
 	private ControlLoop cloop;
+	
 	private RateLimit rateLimit;
 	private SettledDetector settledDetector; 
 	private SettledDetector hangupDetector;
 	
-	private boolean WRITE_LOG_FILE = false;
-	private static LogWriterFactory logFactory = new LogWriterFactory("DriveStraight");
-	private LogWriterFactory.Writer logWriter;
-
+	// Create a counting system to append to the file name each time
+	// command runs; this means the control loop or other logging
+	// form can simply use the counter to create uniqueness
+	private static long instanceCount = 0;
 	
-	public DriveStraight( double distanceInch) {		
+	public DriveStraight( double distanceInch) 
+	{		
 		requires( Robot.autonomousSubsystem);
 		
 		this.distanceInch = distanceInch;
+		
+		DriveStraight.instanceCount++;	// Count each instance so we know which command this was in the recordings
 	}
 
 	@Override
-	protected void initialize() {
+	protected void initialize() 
+	{
 		// Compute setPoint
 		double setPoint = distanceInch + Robot.driveSubsystem.getPosition_inch();
 		
 		// Make helpers
+		/// TODO: These could be static since they never change
 		rateLimit = new RateLimit( RATE_LIM_PER_SEC);
 		settledDetector = new SettledDetector( SETTLED_MSECS, DEAD_ZONE_INCH);
 		hangupDetector = new SettledDetector( HANGUP_MSECS, STOPPED_RATE_IPS);
-		logWriter = logFactory.create( WRITE_LOG_FILE);	
 						
 		// Put DriveSubsystem into "Align Lock" (drive straight)
         Robot.driveSubsystem.setAlignDrive(true);
 		
-		// Fire up the loop
-		cloop = new ControlLoop( this, setPoint);
-		cloop.enableLogging("DriveStraight");
+		// Fire up the loop at 100 Hz and record the control loop setpoint and feedback
+        /// TODO: Truthfully I don't like this approach (lazy initialization patterns)
+        /// I would create persistent loops in the subsystem that have enable/disable 
+        /// (blocking logic) along with settings to be adjusted by the various commands. 
+        /// Why? Simply because we waste time and create more non-determinism in a system 
+        /// that creates/destroys objects as it goes.
+        /// If we were constantly calling a drive straight command for various reason then
+        /// eventually a garbage collection cycle will cause a hiccup that just adds uncertainty
+        /// to a world that prefers deterministic responses.
+		cloop = new ControlLoop( this, 
+				                 setPoint, 
+				                 10, 
+				                 String.format("DriveStraight_%d", DriveStraight.instanceCount));
+		cloop.setLoggingKey("DriveStraight");	// Displays this key on dashboard AND writes files (set to "" to disable)
 		cloop.start();
 	}
 		
 	@Override
-	protected boolean isFinished() {
+	protected boolean isFinished() 
+	{
 		
 		if( settledDetector.isSettled()
 			&&
@@ -104,12 +121,11 @@ public class DriveStraight extends Command implements ControlLoop.ControlLoopUse
 	}
 	
 	@Override
-	protected void end() {
+	protected void end() 
+	{
 	
 		// Don't forget to stop the control loop!
 		cloop.stop();
-		
-		logWriter.close();
 		
 		// Put DriveSubsystem out of "Align Lock"
         Robot.driveSubsystem.setAlignDrive(false);
@@ -119,46 +135,52 @@ public class DriveStraight extends Command implements ControlLoop.ControlLoopUse
 	}
 	
 	@Override
-	protected void interrupted() {
+	protected void interrupted() 
+	{
 		end();
 	}
 	
 	
 	@Override
-	public double getFeedback() {
+	public double getFeedback() 
+	{
 		return Robot.driveSubsystem.getPosition_inch();
 	}
 	
 	@Override
-	public void setError( double error) {
-
-		logWriter.writeLine( 
-				String.format("%f %f", 
-					error, Robot.driveSubsystem.getFwdVelocity_ips())
-				); 
+	public void setError( double error) 
+	{
 
 		settledDetector.set(error);
 		hangupDetector.set( Robot.driveSubsystem.getFwdVelocity_ips());
 		
 		double x;		
-		if( Math.abs(error) < MIN_DRIVE_DISTANCE_INCH)
+		if( Math.abs(error) <= MIN_DRIVE_DISTANCE_INCH)
+		{
 			x = Math.signum(error)*MIN_DRIVE;
+		}
 		else
+		{
 			x = Math.signum(error)*MAX_DRIVE;
+		}
 		
 		x = rateLimit.f(x);
 		
-		if( Math.abs(error) < DEAD_ZONE_INCH)
+		if( Math.abs(error) <= DEAD_ZONE_INCH)
+		{
 			x = 0.0;
-		
-		if( Math.abs(error) > DEAD_ZONE_INCH)
+		}
+		else
+		{
 			x += DITHER_AMPL*ditherSignal();
+		}
 		
 		// Set the output
     	Robot.driveSubsystem.doAutoStraight(x);
 	}
 
-	double ditherSignal() {
+	double ditherSignal() 
+	{
 		return Math.sin( DITHER_FREQ*(2.0*Math.PI)*System.currentTimeMillis()/1000.0);
 	}
 }
